@@ -57,8 +57,9 @@ class GameEngine:
         
         # New State for Phases
         self.phase = "Day" # "Day", "Vote", "Night"
-        self.messages_this_round = 0
-        self.max_messages_per_round = (num_bots + 1) * 2 # Roughly everyone speaks twice
+        self.messages_this_phase = 0
+        self.current_rotation = 1
+        self.day_number = 1
         
         # Setup players
         self.players.append(Player(name=human_name, is_human=True))
@@ -80,12 +81,24 @@ class GameEngine:
     def get_alive_players(self) -> List[Player]:
         return [p for p in self.players if p.is_alive]
 
+    def get_rotations_until_vote(self) -> int:
+        # Day 1 requires 4 full rotations, subsequent days require 2 rotation
+        target_rotations = 4 if self.day_number == 1 else 2
+        return max(0, target_rotations - self.current_rotation + 1)
+        
+    def check_rotation_complete(self):
+        # A rotation is complete when every alive player has sent a message
+        if self.messages_this_phase >= len(self.get_alive_players()):
+            self.current_rotation += 1
+            self.messages_this_phase = 0
+
     def add_message(self, name: str, message: str):
         self.chat_history.append({"name": name, "message": message})
         if name != "System":
-            self.messages_this_round += 1
+            self.messages_this_phase += 1
+            self.check_rotation_complete()
             
-        if self.phase == "Day" and self.messages_this_round >= self.max_messages_per_round:
+        if self.phase == "Day" and self.get_rotations_until_vote() <= 0:
             self.phase = "Vote"
             self.add_message("System", "The sun is setting. It is time to vote. Everyone must cast their vote now.")
 
@@ -127,7 +140,7 @@ class GameEngine:
             # Note: For llama-3, the messages format is natively supported by the InferenceClient
             response = self.client.chat_completion(
                 messages, 
-                max_tokens=60,
+                max_tokens=200,
                 temperature=0.7,
                 top_p=0.9,
             )
@@ -144,13 +157,13 @@ class GameEngine:
             print(f"Error generating response for {bot.name}: {e}")
             return f"*(mutters suspiciously)*"
 
-    def eliminate_player(self, name: str) -> bool:
+    def eliminate_player(self, name: str) -> Optional[Player]:
         for p in self.players:
             if p.name == name and p.is_alive:
                 p.is_alive = False
                 self.check_win_condition()
-                return True
-        return False
+                return p
+        return None
 
     def process_night_phase(self):
         """Mafia kills someone overnight"""
@@ -165,15 +178,18 @@ class GameEngine:
             
         # Target a random villager
         victim = random.choice(alive_villagers)
-        self.eliminate_player(victim.name)
+        eliminated_p = self.eliminate_player(victim.name)
         
-        self.add_message("System", f"The sun rises. We found {victim.name} eliminated during the night...")
+        role_msg = f"They were a {eliminated_p.role}!" if eliminated_p else ""
+        self.add_message("System", f"The sun rises. We found {victim.name} eliminated during the night... {role_msg}")
         
         # Reset for next day
         if not self.winner:
             self.phase = "Day"
-            self.messages_this_round = 0
-            self.add_message("System", "A new day begins. Who is the Mafia? Discuss!")
+            self.messages_this_phase = 0
+            self.current_rotation = 1
+            self.day_number += 1
+            self.add_message("System", f"A new day begins (Day {self.day_number}). Who is the Mafia? Discuss!")
 
     def check_win_condition(self):
         alive_players = self.get_alive_players()

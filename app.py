@@ -11,7 +11,13 @@ st.set_page_config(page_title="AI Mafia", page_icon="🕵️", layout="wide")
 if "engine" not in st.session_state:
     st.session_state.engine = None
 if "hf_token" not in st.session_state:
-    st.session_state.hf_token = os.getenv("HF_TOKEN", "")
+    try:
+        # First try fetching from Streamlit secrets
+        token = st.secrets.get("HF_TOKEN", os.getenv("HF_TOKEN", ""))
+    except Exception:
+        # Fallback to local .env if testing locally and Streamlit secrets not found
+        token = os.getenv("HF_TOKEN", "")
+    st.session_state.hf_token = token
 if "agent_queue" not in st.session_state:
     st.session_state.agent_queue = []
 
@@ -33,7 +39,11 @@ st.title("🕵️ AI Mafia Game")
 # Setup Sidebar
 with st.sidebar:
     st.header("Game Settings")
-    token_input = st.text_input("Hugging Face Token", type="password", value=st.session_state.hf_token)
+    
+    if st.session_state.hf_token:
+        token_input = st.session_state.hf_token
+    else:
+        token_input = st.text_input("Hugging Face Token", type="password")
     
     if st.session_state.engine is None:
         player_name = st.text_input("Your Name", value="Player")
@@ -60,15 +70,18 @@ with st.sidebar:
         st.header("Vote to Eliminate")
         if not st.session_state.engine.winner and any(p.is_human for p in alive):
             if st.session_state.engine.phase != "Vote":
-                st.info(f"Voting opens after {st.session_state.engine.max_messages_per_round - st.session_state.engine.messages_this_round} more messages.")
+                rotations_remaining = st.session_state.engine.get_rotations_until_vote()
+                plural = "round" if rotations_remaining == 1 else "rounds"
+                st.info(f"Voting opens after {rotations_remaining} more {plural} of discussion.")
             else:
                 st.warning("It is time to vote! Choose someone to eliminate.")
                 vote_options = [p.name for p in alive if not p.is_human]
                 vote_choice = st.selectbox("Select a player to vote out", ["Select..."] + vote_options)
                 if st.button("Cast Vote") and vote_choice != "Select...":
                     st.session_state.engine.add_message("System", f"{st.session_state.engine.players[0].name} voted to eliminate {vote_choice}.")
-                    st.session_state.engine.eliminate_player(vote_choice)
-                    st.session_state.engine.add_message("System", f"{vote_choice} was eliminated!")
+                    eliminated_player = st.session_state.engine.eliminate_player(vote_choice)
+                    if eliminated_player:
+                        st.session_state.engine.add_message("System", f"{vote_choice} was eliminated! They were a {eliminated_player.role}!")
                     
                     if not st.session_state.engine.winner:
                         # Immediately trigger night phase after voting if game isn't over
@@ -95,7 +108,9 @@ if st.session_state.engine is not None:
     # Chat Input & Turn Logic
     human_alive = any(p.is_human and p.is_alive for p in engine.players)
     if not human_alive and not engine.winner:
-        st.warning("You have been eliminated! The game is over for you. The Mafia wins.")
+        mafia_players = [p.name for p in engine.players if p.role == "Mafia"]
+        mafia_str = ", ".join(mafia_players)
+        st.warning(f"You have been eliminated! The game is over for you. The Mafia wins. The Mafia was: {mafia_str}")
     elif not engine.winner:
         if engine.phase == "Vote":
             st.error("The Day has ended! You must cast your vote in the sidebar to continue.")
