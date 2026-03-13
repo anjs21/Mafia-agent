@@ -1,10 +1,10 @@
 import os
 import random
 from typing import List, Dict, Optional
-from huggingface_hub import InferenceClient
+import ollama
 
 # Constants
-MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct"
+MODEL_ID = "llama3.1" # Standard Ollama model name
 
 # System prompts to guide the AI players
 VILLAGER_PROMPT_TEMPLATE = """You are playing a game of Mafia. You are a Villager.
@@ -47,9 +47,7 @@ class Player:
         return f"{self.name} ({'You' if self.is_human else 'AI'})"
 
 class GameEngine:
-    def __init__(self, human_name: str, num_bots: int, hf_token: str):
-        self.hf_token = hf_token
-        self.client = InferenceClient(model=MODEL_ID, token=self.hf_token)
+    def __init__(self, human_name: str, num_bots: int):
         
         self.players: List[Player] = []
         self.chat_history: List[Dict[str, str]] = [] # list of {"name": name, "message": msg}
@@ -136,16 +134,18 @@ class GameEngine:
             messages.append({"role": "user", "content": f"The game just started. You are {bot.name}. Say hello and start the conversation! Reply ONLY with your message content."})
 
         try:
-            # Call Hugging Face API
-            # Note: For llama-3, the messages format is natively supported by the InferenceClient
-            response = self.client.chat_completion(
-                messages, 
-                max_tokens=200,
-                temperature=0.7,
-                top_p=0.9,
+            # Call Ollama local API
+            response = ollama.chat(
+                model=MODEL_ID,
+                messages=messages,
+                options={
+                    "num_predict": 200,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                }
             )
             # Extract just the message text
-            bot_msg = response.choices[0].message.content.strip()
+            bot_msg = response['message']['content'].strip()
             # Clean up if the model includes quotes or the name prefix
             if bot_msg.startswith(f"{bot.name}:"):
                 bot_msg = bot_msg[len(bot.name)+1:].strip()

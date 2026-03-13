@@ -10,25 +10,13 @@ st.set_page_config(page_title="AI Mafia", page_icon="🕵️", layout="wide")
 # Initialize session state for game engine
 if "engine" not in st.session_state:
     st.session_state.engine = None
-if "hf_token" not in st.session_state:
-    try:
-        # First try fetching from Streamlit secrets
-        token = st.secrets.get("HF_TOKEN", os.getenv("HF_TOKEN", ""))
-    except Exception:
-        # Fallback to local .env if testing locally and Streamlit secrets not found
-        token = os.getenv("HF_TOKEN", "")
-    st.session_state.hf_token = token
 if "agent_queue" not in st.session_state:
     st.session_state.agent_queue = []
 
-def init_game(name, num_bots, token):
-    if not token:
-        st.error("Please provide a Hugging Face Token.")
-        return
+def init_game(name, num_bots):
     try:
-        st.session_state.engine = GameEngine(human_name=name, num_bots=num_bots, hf_token=token)
+        st.session_state.engine = GameEngine(human_name=name, num_bots=num_bots)
         st.session_state.engine.add_message("System", "Welcome to Mafia! Find the Mafia before it's too late.")
-        st.session_state.hf_token = token
         # Queue all bots to introduce themselves right at the beginning
         st.session_state.agent_queue = [p.name for p in st.session_state.engine.get_alive_players() if not p.is_human]
     except Exception as e:
@@ -40,16 +28,11 @@ st.title("🕵️ AI Mafia Game")
 with st.sidebar:
     st.header("Game Settings")
     
-    if st.session_state.hf_token:
-        token_input = st.session_state.hf_token
-    else:
-        token_input = st.text_input("Hugging Face Token", type="password")
-    
     if st.session_state.engine is None:
         player_name = st.text_input("Your Name", value="Player")
         num_bots = st.slider("Number of AI Bots", 3, 5, 4)
         if st.button("Start Game"):
-            init_game(player_name, num_bots, token_input)
+            init_game(player_name, num_bots)
             st.rerun()
     else:
         st.success("Game is running!")
